@@ -25,9 +25,6 @@ with st.sidebar:
     presence_penalty = st.slider("Presence Penalty", -2.0, 2.0, 0.0, 0.1)
 
     st.divider()
-    st.markdown("**Azure OpenAI 환경변수**")
-    st.code("AZURE_OAI_ENDPOINT\nAZURE_OAI_DEPLOYMENT\nAZURE_OAI_KEY", language="bash")
-
     if st.button("🗑️ 대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
