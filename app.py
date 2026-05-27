@@ -75,9 +75,9 @@ if user_input:
     st.session_state.messages.append(("user", user_input))
 
     # ── API에 보낼 메시지 구성 (시스템 + 슬라이딩 윈도우) ───────────────────
-    message_limit = message_cnt * 2          # 보관할 최대 메시지 수
+    message_limit = message_cnt * 2
 
-    history = st.session_state.messages      # 전체 기록
+    history = st.session_state.messages
     windowed = history[-message_limit:] if len(history) > message_limit else history
 
     chat_payload = [SYSTEM_PROMPT] + [
@@ -107,6 +107,9 @@ if user_input:
             )
 
             for chunk in stream:
+                # 빈 choices 청크 건너뜀 (마지막 청크에서 자주 발생)
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
                 if delta and delta.content:
                     full_response += delta.content
