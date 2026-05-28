@@ -4,12 +4,13 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit as st
+import pandas as pd
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── 페이지 설정 ──────────────────────────────────────────────────────────────
+# ── [고정] 페이지 설정 ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="종근당의 챗봇",
     page_icon="💻",
@@ -66,18 +67,11 @@ TIMEZONE_DATA = {
 }
 
 # ── 실행 대상 파이썬 기능(Tools) 정의 ─────────────────────────────────────────
-def add_numbers(num1, num2):
-    return json.dumps({"operation": "add", "result": num1 + num2})
-
-def subtract_numbers(num1, num2):
-    return json.dumps({"operation": "subtract", "result": num1 - num2})
-
-def multiply_numbers(num1, num2):
-    return json.dumps({"operation": "multiply", "result": num1 * num2})
-
+def add_numbers(num1, num2): return json.dumps({"operation": "add", "result": num1 + num2})
+def subtract_numbers(num1, num2): return json.dumps({"operation": "subtract", "result": num1 - num2})
+def multiply_numbers(num1, num2): return json.dumps({"operation": "multiply", "result": num1 * num2})
 def divide_numbers(num1, num2):
-    if num2 == 0:
-        return json.dumps({"operation": "divide", "error": "Cannot divide by zero."})
+    if num2 == 0: return json.dumps({"operation": "divide", "error": "Cannot divide by zero."})
     return json.dumps({"operation": "divide", "result": num1 / num2})
 
 def get_current_weather(location, unit=None):
@@ -85,11 +79,7 @@ def get_current_weather(location, unit=None):
     for key in WEATHER_DATA:
         if key in location_lower:
             weather = WEATHER_DATA[key]
-            return json.dumps({
-                "location": location,
-                "temperature": weather["temperature"],
-                "unit": unit if unit else weather["unit"]
-            })
+            return json.dumps({"location": location, "temperature": weather["temperature"], "unit": unit if unit else weather["unit"]})
     return json.dumps({"location": location, "temperature": "unknown"})
 
 def get_current_time(location):
@@ -100,38 +90,40 @@ def get_current_time(location):
             return json.dumps({"location": location, "current_time": current_time})
     return json.dumps({"location": location, "current_time": "unknown"})
 
+def draw_line_chart(title, values, labels=None):
+    try:
+        if labels and len(labels) == len(values):
+            df = pd.DataFrame({"값 (Value)": values}, index=labels)
+        else:
+            df = pd.DataFrame({"값 (Value)": values})
+        st.subheader(f"📊 {title}")
+        st.line_chart(df)
+        return json.dumps({"status": "success", "message": f"'{title}' 그래프를 화면에 성공적으로 렌더링했습니다."})
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
+
+
 # ── 툴 스펙 명세서 리스트 구성 ────────────────────────────────────────────────
 tools = [
     {"type": "function", "function": {"name": "add_numbers", "description": "두 숫자의 합을 계산합니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
     {"type": "function", "function": {"name": "subtract_numbers", "description": "첫 번째 숫자에서 두 번째 숫자를 뺍니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
     {"type": "function", "function": {"name": "multiply_numbers", "description": "두 숫자의 곱을 계산합니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
     {"type": "function", "function": {"name": "divide_numbers", "description": "첫 번째 숫자를 두 번째 숫자로 나눕니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
+    {"type": "function", "function": {"name": "get_current_weather", "description": "지정된 도시의 현재 날씨 기온 정보를 가져옵니다. 지원도시: Seoul, Tokyo, Paris, San Francisco, Cheongju", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "get_current_time", "description": "지정된 도시의 현재 날짜와 시간 정보를 가져옵니다. 지원도시: Seoul, Tokyo, Paris, San Francisco, Cheongju", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}},
     {
         "type": "function",
         "function": {
-            "name": "get_current_weather",
-            "description": "지정된 도시의 현재 날씨와 기온 정보를 가져옵니다. 지원 도시: Seoul, Tokyo, Paris, San Francisco, Cheongju",
+            "name": "draw_line_chart",
+            "description": "사용자가 데이터 시각화나 그래프 작성을 요청할 때 수치형 데이터를 기반으로 선 그래프를 화면에 그려줍니다.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "도시 이름 (예: Seoul 또는 서울)"},
-                    "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+                    "title": {"type": "string", "description": "그래프의 제목"},
+                    "values": {"type": "array", "items": {"type": "number"}, "description": "숫자 배열 데이터"},
+                    "labels": {"type": "array", "items": {"type": "string"}, "description": "X축 라벨 배열"}
                 },
-                "required": ["location"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "지정된 도시의 현재 날짜와 시간(연, 월, 일, 시, 분) 정보를 가져옵니다. 지원 도시: Seoul, Tokyo, Paris, San Francisco, Cheongju",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string", "description": "도시 이름 (예: Tokyo 또는 도쿄)"}
-                },
-                "required": ["location"]
+                "required": ["title", "values"]
             }
         }
     }
@@ -139,14 +131,14 @@ tools = [
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "너는 컴퓨터, 연산, 날씨 및 시간 정보를 안내하는 올라운더 전문가야. 사용자의 요청에 따라 적절한 도구를 호출해서 정확한 정보를 실시간으로 답변해줘.",
+    "content": "너는 데이터 분석, 연산, 날씨 조회를 담당하는 스마트 전문가야. 사용자가 트렌드, 변화 추이 등 데이터 시각화를 원하거나 그래프를 그려달라고 하면 'draw_line_chart' 도구를 사용하여 즉시 시각화 자료를 제공해줘.",
 }
 
 # ── 세션 상태 초기화 ─────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ── 헤더 ────────────────────────────────────────────────────────────────────
+# ── [고정] 헤더 ──────────────────────────────────────────────────────────────
 st.title("💻 종근당의 챗봇")
 st.caption("Azure OpenAI 기반 챗봇")
 st.divider()
@@ -167,14 +159,13 @@ if user_input:
 
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # ── API용 메시지 버퍼 구성 (시스템 프롬프트 + 슬라이딩 윈도우) ──────────────
     message_limit = message_cnt * 2
     history = st.session_state.messages
     windowed = history[-message_limit:] if len(history) > message_limit else history
 
     chat_payload = [SYSTEM_PROMPT] + windowed
 
-    # ── AI 응답 처리 (스트리밍 및 멀티 툴 콜링 대응) ───────────────────────────
+    # ── AI 응답 처리 ─────────────────────────────────────────────────────────
     with st.chat_message("assistant", avatar="💬"):
         placeholder = st.empty()
         full_response = ""
@@ -200,34 +191,23 @@ if user_input:
                     continue
                 delta = chunk.choices[0].delta
                 
-                # 1. 텍스트 출력 스트리밍
                 if delta and delta.content:
                     full_response += delta.content
                     placeholder.markdown(full_response + "▌")
                 
-                # 2. 실시간 툴 콜 데이터 조각 수집
                 if delta and delta.tool_calls:
                     for tool_chunk in delta.tool_calls:
                         idx = tool_chunk.index
                         if idx not in tool_calls_chunks:
-                            tool_calls_chunks[idx] = {
-                                "id": tool_chunk.id,
-                                "name": tool_chunk.function.name,
-                                "arguments": ""
-                            }
+                            tool_calls_chunks[idx] = {"id": tool_chunk.id, "name": tool_chunk.function.name, "arguments": ""}
                         if tool_chunk.function.arguments:
                             tool_calls_chunks[idx]["arguments"] += tool_chunk.function.arguments
 
-            placeholder.markdown(full_response if full_response else "🛠️ 필요한 정보를 가져오는 중...")
+            placeholder.markdown(full_response if full_response else "🛠️ 도구를 가동 중입니다...")
 
-            # 3. 툴 콜 실행 및 피드백 처리
             if tool_calls_chunks:
                 built_tool_calls = [
-                    {
-                        "id": chunk_data["id"],
-                        "type": "function",
-                        "function": {"name": chunk_data["name"], "arguments": chunk_data["arguments"]}
-                    }
+                    {"id": chunk_data["id"], "type": "function", "function": {"name": chunk_data["name"], "arguments": chunk_data["arguments"]}}
                     for chunk_data in tool_calls_chunks.values()
                 ]
                 
@@ -239,34 +219,33 @@ if user_input:
                     func_name = tool["function"]["name"]
                     func_args = json.loads(tool["function"]["arguments"])
                     
-                    # 함수 종류에 따른 인자 분기 처리
                     if func_name in ["add_numbers", "subtract_numbers", "multiply_numbers", "divide_numbers"]:
-                        num1 = func_args.get("num1")
-                        num2 = func_args.get("num2")
+                        num1, num2 = func_args.get("num1"), func_args.get("num2")
                         if func_name == "add_numbers": result_content = add_numbers(num1, num2)
                         elif func_name == "subtract_numbers": result_content = subtract_numbers(num1, num2)
                         elif func_name == "multiply_numbers": result_content = multiply_numbers(num1, num2)
                         elif func_name == "divide_numbers": result_content = divide_numbers(num1, num2)
                     
                     elif func_name == "get_current_weather":
-                        result_content = get_current_weather(func_args.get("location"), func_args.get("unit"))
+                        result_content = get_current_weather(func_args.get("location"))
                         
                     elif func_name == "get_current_time":
                         result_content = get_current_time(func_args.get("location"))
+                    
+                    elif func_name == "draw_line_chart":
+                        result_content = draw_line_chart(
+                            title=func_args.get("title"),
+                            values=func_args.get("values"),
+                            labels=func_args.get("labels")
+                        )
                         
                     else:
                         result_content = json.dumps({"error": "Unknown function"})
 
-                    tool_response_message = {
-                        "role": "tool",
-                        "tool_call_id": tool["id"],
-                        "name": func_name,
-                        "content": result_content
-                    }
+                    tool_response_message = {"role": "tool", "tool_call_id": tool["id"], "name": func_name, "content": result_content}
                     st.session_state.messages.append(tool_response_message)
                     chat_payload.append(tool_response_message)
 
-                # 4. 외부 도구 데이터 취합 후 최종 답변 스트리밍
                 final_placeholder = st.empty()
                 final_response = ""
 
@@ -279,8 +258,7 @@ if user_input:
                 )
 
                 for chunk in second_stream:
-                    if not chunk.choices:
-                        continue
+                    if not chunk.choices: continue
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
                         final_response += delta.content
