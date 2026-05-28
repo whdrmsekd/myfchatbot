@@ -67,7 +67,7 @@ TIMEZONE_DATA = {
     "cheongju": "Asia/Seoul"
 }
 
-# ── 실행 대상 파이썬 기능(Tools) 정의 (화면 출력 print문 완전 제거) ─────────
+# ── 실행 대상 파이썬 기능(Tools) 정의 ─────────────────────────────────────────
 def add_numbers(num1, num2): return json.dumps({"operation": "add", "result": num1 + num2})
 def subtract_numbers(num1, num2): return json.dumps({"operation": "subtract", "result": num1 - num2})
 def multiply_numbers(num1, num2): return json.dumps({"operation": "multiply", "result": num1 * num2})
@@ -91,12 +91,27 @@ def get_current_time(location):
             return json.dumps({"location": location, "current_time": current_time})
     return json.dumps({"location": location, "current_time": "unknown"})
 
+# 🛠️ [수정] X축 텍스트 정렬 꼬임 현상 방지 로직 보강
 def draw_line_chart(title, values, labels=None):
     try:
         if labels and len(labels) == len(values):
+            # 만약 라벨이 모두 숫자로만 구성되어 있다면 숫자형 데이터 타입으로 변환 시도
+            # (문자열 '11'이 '101'보다 앞에 오게 만드는 사전순 정렬 오류 방지)
+            try:
+                numeric_labels = [float(str(l).replace(",", "")) for l in labels]
+                # 소수점 뒤가 0으로 끝나면 깔끔하게 정수로 치환
+                labels = [int(n) if n.is_integer() else n for n in numeric_labels]
+            except ValueError:
+                # 숫자로 변환이 불가능한 순수 텍스트(예: '1월', '2월')라면 
+                # 데이터가 들어온 순서 고유값을 보존하기 위해 범주형 변환 처리
+                labels = pd.Categorical(labels, categories=labels, ordered=True)
+                
             df = pd.DataFrame({"값 (Value)": values}, index=labels)
+            # 인덱스(X축) 기준으로 정렬하여 차트 뒤틀림 완전 차단
+            df = df.sort_index()
         else:
             df = pd.DataFrame({"값 (Value)": values})
+            
         st.subheader(f"📊 {title}")
         st.line_chart(df)
         return json.dumps({"status": "success", "message": f"'{title}' 그래프를 화면에 성공적으로 렌더링했습니다. 이미지 주소나 base64 코드를 유저에게 절대 직접 출력하지 마세요."})
@@ -122,7 +137,7 @@ tools = [
                 "properties": {
                     "title": {"type": "string", "description": "그래프의 제목"},
                     "values": {"type": "array", "items": {"type": "number"}, "description": "숫자 배열 데이터"},
-                    "labels": {"type": "array", "items": {"type": "string"}, "description": "X축 라벨 배열"}
+                    "labels": {"type": "array", "items": {"type": "string"}, "description": "X축 라벨 배열 (반드시 데이터 순서 혹은 오름차순 순서 규칙을 명확히 정의해서 전달하세요)"}
                 },
                 "required": ["title", "values"]
             }
@@ -194,7 +209,6 @@ if user_input:
                 
                 if delta and delta.content:
                     full_response += delta.content
-                    # 실시간 스트리밍 중 base64 패턴이 보이면 마스킹 처리하여 화면 오염 방지
                     clean_stream = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
                     clean_stream = re.sub(r'\(data:image\/.*?base64,.*?\)', '', clean_stream, flags=re.DOTALL)
                     placeholder.markdown(clean_stream + "▌")
@@ -207,7 +221,6 @@ if user_input:
                         if tool_chunk.function.arguments:
                             tool_calls_chunks[idx]["arguments"] += tool_chunk.function.arguments
 
-            # 1차 스트리밍 완료 후 청소
             full_response = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
             full_response = re.sub(r'\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
             placeholder.markdown(full_response if full_response else "🛠️ 도구를 가동 중입니다...")
@@ -269,12 +282,10 @@ if user_input:
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
                         final_response += delta.content
-                        # 2차 답변에서도 불필요한 이미지 텍스트 패턴 실시간 차단 정제
                         clean_final = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
                         clean_final = re.sub(r'\(data:image\/.*?base64,.*?\)', '', clean_final, flags=re.DOTALL)
                         final_placeholder.markdown(clean_final + "▌")
 
-                # 최종 결과 텍스트 정규식 정제 마무리
                 final_response = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
                 final_response = re.sub(r'\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
                 
