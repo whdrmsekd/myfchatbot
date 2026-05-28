@@ -1,5 +1,8 @@
 import os
 import json
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import streamlit as st
 from openai import AzureOpenAI
 from dotenv import load_dotenv
@@ -8,7 +11,7 @@ load_dotenv()
 
 # ── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="종근당의 AI챗봇",
+    page_title="종근당의 챗봇",
     page_icon="💻",
     layout="centered",
 )
@@ -45,7 +48,24 @@ client = AzureOpenAI(
     api_version="2025-01-01-preview",
 )
 
-# ── 사칙연산 실제 파이썬 함수 및 툴 스펙 정의 ─────────────────────────────────
+# ── 데이터셋 정의 (날씨 및 시간) ──────────────────────────────────────────────
+WEATHER_DATA = {
+    "tokyo": {"temperature": "10", "unit": "celsius"},
+    "san francisco": {"temperature": "72", "unit": "fahrenheit"},
+    "paris": {"temperature": "22", "unit": "celsius"},
+    "seoul": {"temperature": "30", "unit": "celsius"},
+    "cheongju": {"temperature": "24", "unit": "celsius"}
+}
+
+TIMEZONE_DATA = {
+    "tokyo": "Asia/Tokyo",
+    "san francisco": "America/Los_Angeles",
+    "paris": "Europe/Paris",
+    "seoul": "Asia/Seoul",
+    "cheongju": "Asia/Seoul"
+}
+
+# ── 실행 대상 파이썬 기능(Tools) 정의 ─────────────────────────────────────────
 def add_numbers(num1, num2):
     return json.dumps({"operation": "add", "result": num1 + num2})
 
@@ -60,25 +80,75 @@ def divide_numbers(num1, num2):
         return json.dumps({"operation": "divide", "error": "Cannot divide by zero."})
     return json.dumps({"operation": "divide", "result": num1 / num2})
 
+def get_current_weather(location, unit=None):
+    location_lower = location.lower()
+    for key in WEATHER_DATA:
+        if key in location_lower:
+            weather = WEATHER_DATA[key]
+            return json.dumps({
+                "location": location,
+                "temperature": weather["temperature"],
+                "unit": unit if unit else weather["unit"]
+            })
+    return json.dumps({"location": location, "temperature": "unknown"})
+
+def get_current_time(location):
+    location_lower = location.lower()
+    for key, timezone in TIMEZONE_DATA.items():
+        if key in location_lower:
+            current_time = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %I:%M %p")
+            return json.dumps({"location": location, "current_time": current_time})
+    return json.dumps({"location": location, "current_time": "unknown"})
+
+# ── 툴 스펙 명세서 리스트 구성 ────────────────────────────────────────────────
 tools = [
     {"type": "function", "function": {"name": "add_numbers", "description": "두 숫자의 합을 계산합니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
     {"type": "function", "function": {"name": "subtract_numbers", "description": "첫 번째 숫자에서 두 번째 숫자를 뺍니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
     {"type": "function", "function": {"name": "multiply_numbers", "description": "두 숫자의 곱을 계산합니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
-    {"type": "function", "function": {"name": "divide_numbers", "description": "첫 번째 숫자를 두 번째 숫자로 나눕니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}}
+    {"type": "function", "function": {"name": "divide_numbers", "description": "첫 번째 숫자를 두 번째 숫자로 나눕니다.", "parameters": {"type": "object", "properties": {"num1": {"type": "number"}, "num2": {"type": "number"}}, "required": ["num1", "num2"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_weather",
+            "description": "지정된 도시의 현재 날씨와 기온 정보를 가져옵니다. 지원 도시: Seoul, Tokyo, Paris, San Francisco, Cheongju",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "도시 이름 (예: Seoul 또는 서울)"},
+                    "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+                },
+                "required": ["location"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "지정된 도시의 현재 날짜와 시간(연, 월, 일, 시, 분) 정보를 가져옵니다. 지원 도시: Seoul, Tokyo, Paris, San Francisco, Cheongju",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "도시 이름 (예: Tokyo 또는 도쿄)"}
+                },
+                "required": ["location"]
+            }
+        }
+    }
 ]
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "너는 컴퓨터 및 복잡한 수식 연산 전문가야. 사칙연산 요청이 들어오면 제공된 도구를 사용해서 정확히 계산해줘.",
+    "content": "너는 컴퓨터, 연산, 날씨 및 시간 정보를 안내하는 올라운더 전문가야. 사용자의 요청에 따라 적절한 도구를 호출해서 정확한 정보를 실시간으로 답변해줘.",
 }
 
 # ── 세션 상태 초기화 ─────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
-    st.session_state.messages = []   # OpenAI API 규격에 맞는 딕셔너리 리스트로 통합 변경
+    st.session_state.messages = []
 
 # ── 헤더 ────────────────────────────────────────────────────────────────────
-st.title("💻 종근당의 AI챗봇")
-st.caption("Azure OpenAI 기반 챗봇")
+st.title("💻 종근당의 챗봇")
+st.caption("사칙연산 · 실시간 날씨 · 세계 시간 확인 툴 콜링 지원")
 st.divider()
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
@@ -97,18 +167,18 @@ if user_input:
 
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # ── API에 보낼 메시지 구성 (시스템 + 슬라이딩 윈도우) ───────────────────
+    # ── API용 메시지 버퍼 구성 (시스템 프롬프트 + 슬라이딩 윈도우) ──────────────
     message_limit = message_cnt * 2
     history = st.session_state.messages
     windowed = history[-message_limit:] if len(history) > message_limit else history
 
     chat_payload = [SYSTEM_PROMPT] + windowed
 
-    # ── AI 응답 처리 (스트리밍 + 툴 콜링 대응) ─────────────────────────────────
+    # ── AI 응답 처리 (스트리밍 및 멀티 툴 콜링 대응) ───────────────────────────
     with st.chat_message("assistant", avatar="💬"):
         placeholder = st.empty()
         full_response = ""
-        tool_calls_chunks = {} # 스트리밍되는 툴 콜 조각들을 모을 그릇
+        tool_calls_chunks = {}
 
         try:
             stream = client.chat.completions.create(
@@ -130,12 +200,12 @@ if user_input:
                     continue
                 delta = chunk.choices[0].delta
                 
-                # 1. 일반 텍스트 응답 스트리밍
+                # 1. 텍스트 출력 스트리밍
                 if delta and delta.content:
                     full_response += delta.content
                     placeholder.markdown(full_response + "▌")
                 
-                # 2. 툴 콜링 데이터 스트리밍 수집
+                # 2. 실시간 툴 콜 데이터 조각 수집
                 if delta and delta.tool_calls:
                     for tool_chunk in delta.tool_calls:
                         idx = tool_chunk.index
@@ -148,11 +218,10 @@ if user_input:
                         if tool_chunk.function.arguments:
                             tool_calls_chunks[idx]["arguments"] += tool_chunk.function.arguments
 
-            placeholder.markdown(full_response if full_response else "🛠️ 계산 도구를 가져오는 중...")
+            placeholder.markdown(full_response if full_response else "🛠️ 필요한 정보를 가져오는 중...")
 
-            # 3. 수집된 툴 콜링이 있다면 실행 시점
+            # 3. 툴 콜 실행 및 피드백 처리
             if tool_calls_chunks:
-                # 모델의 tool_calls 요청 명세를 메시지 내역에 추가
                 built_tool_calls = [
                     {
                         "id": chunk_data["id"],
@@ -166,21 +235,25 @@ if user_input:
                 st.session_state.messages.append(assistant_message)
                 chat_payload.append(assistant_message)
 
-                # 각 툴을 순서대로 실행하고 결과를 페이로드에 추가
                 for tool in built_tool_calls:
                     func_name = tool["function"]["name"]
                     func_args = json.loads(tool["function"]["arguments"])
-                    num1 = func_args.get("num1")
-                    num2 = func_args.get("num2")
-
-                    if func_name == "add_numbers":
-                        result_content = add_numbers(num1, num2)
-                    elif func_name == "subtract_numbers":
-                        result_content = subtract_numbers(num1, num2)
-                    elif func_name == "multiply_numbers":
-                        result_content = multiply_numbers(num1, num2)
-                    elif func_name == "divide_numbers":
-                        result_content = divide_numbers(num1, num2)
+                    
+                    # 함수 종류에 따른 인자 분기 처리
+                    if func_name in ["add_numbers", "subtract_numbers", "multiply_numbers", "divide_numbers"]:
+                        num1 = func_args.get("num1")
+                        num2 = func_args.get("num2")
+                        if func_name == "add_numbers": result_content = add_numbers(num1, num2)
+                        elif func_name == "subtract_numbers": result_content = subtract_numbers(num1, num2)
+                        elif func_name == "multiply_numbers": result_content = multiply_numbers(num1, num2)
+                        elif func_name == "divide_numbers": result_content = divide_numbers(num1, num2)
+                    
+                    elif func_name == "get_current_weather":
+                        result_content = get_current_weather(func_args.get("location"), func_args.get("unit"))
+                        
+                    elif func_name == "get_current_time":
+                        result_content = get_current_time(func_args.get("location"))
+                        
                     else:
                         result_content = json.dumps({"error": "Unknown function"})
 
@@ -193,7 +266,7 @@ if user_input:
                     st.session_state.messages.append(tool_response_message)
                     chat_payload.append(tool_response_message)
 
-                # 4. 툴 연산 결과를 바탕으로 두 번째 대답 스트리밍 (최종 답변 생성)
+                # 4. 외부 도구 데이터 취합 후 최종 답변 스트리밍
                 final_placeholder = st.empty()
                 final_response = ""
 
@@ -217,7 +290,6 @@ if user_input:
                 st.session_state.messages.append({"role": "assistant", "content": final_response})
             
             else:
-                # 툴 콜링이 발생하지 않은 일반 대화인 경우
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         except Exception as e:
