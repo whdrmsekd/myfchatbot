@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit as st
@@ -66,7 +67,7 @@ TIMEZONE_DATA = {
     "cheongju": "Asia/Seoul"
 }
 
-# ── 실행 대상 파이썬 기능(Tools) 정의 ─────────────────────────────────────────
+# ── 실행 대상 파이썬 기능(Tools) 정의 (화면 출력 print문 완전 제거) ─────────
 def add_numbers(num1, num2): return json.dumps({"operation": "add", "result": num1 + num2})
 def subtract_numbers(num1, num2): return json.dumps({"operation": "subtract", "result": num1 - num2})
 def multiply_numbers(num1, num2): return json.dumps({"operation": "multiply", "result": num1 * num2})
@@ -98,7 +99,7 @@ def draw_line_chart(title, values, labels=None):
             df = pd.DataFrame({"값 (Value)": values})
         st.subheader(f"📊 {title}")
         st.line_chart(df)
-        return json.dumps({"status": "success", "message": f"'{title}' 그래프를 화면에 성공적으로 렌더링했습니다."})
+        return json.dumps({"status": "success", "message": f"'{title}' 그래프를 화면에 성공적으로 렌더링했습니다. 이미지 주소나 base64 코드를 유저에게 절대 직접 출력하지 마세요."})
     except Exception as e:
         return json.dumps({"status": "error", "message": str(e)})
 
@@ -115,7 +116,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "draw_line_chart",
-            "description": "사용자가 데이터 시각화나 그래프 작성을 요청할 때 수치형 데이터를 기반으로 선 그래프를 화면에 그려줍니다.",
+            "description": "수치형 데이터를 기반으로 선 그래프를 화면에 그려줍니다. 함수 응답에 이미지 코드가 포함되더라도 최종 답변에 base64 텍스트 데이터를 절대 포함하여 출력하지 마십시오.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -131,7 +132,7 @@ tools = [
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "너는 데이터 분석, 연산, 날씨 조회를 담당하는 스마트 전문가야. 사용자가 트렌드, 변화 추이 등 데이터 시각화를 원하거나 그래프를 그려달라고 하면 'draw_line_chart' 도구를 사용하여 즉시 시각화 자료를 제공해줘.",
+    "content": "너는 데이터 분석, 연산, 날씨 조회를 담당하는 스마트 전문가야. 'draw_line_chart'를 통해 그래프를 그렸다면 이미지 데이터나 (data:image/png;base64...) 형태의 텍스트 주소는 최종 응답에 절대 포함하지 말고, 그래프를 화면에 성공적으로 그렸다는 요약 안내 멘트만 단정하게 완성해줘.",
 }
 
 # ── 세션 상태 초기화 ─────────────────────────────────────────────────────────
@@ -193,7 +194,10 @@ if user_input:
                 
                 if delta and delta.content:
                     full_response += delta.content
-                    placeholder.markdown(full_response + "▌")
+                    # 실시간 스트리밍 중 base64 패턴이 보이면 마스킹 처리하여 화면 오염 방지
+                    clean_stream = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
+                    clean_stream = re.sub(r'\(data:image\/.*?base64,.*?\)', '', clean_stream, flags=re.DOTALL)
+                    placeholder.markdown(clean_stream + "▌")
                 
                 if delta and delta.tool_calls:
                     for tool_chunk in delta.tool_calls:
@@ -203,6 +207,9 @@ if user_input:
                         if tool_chunk.function.arguments:
                             tool_calls_chunks[idx]["arguments"] += tool_chunk.function.arguments
 
+            # 1차 스트리밍 완료 후 청소
+            full_response = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
+            full_response = re.sub(r'\(data:image\/.*?base64,.*?\)', '', full_response, flags=re.DOTALL)
             placeholder.markdown(full_response if full_response else "🛠️ 도구를 가동 중입니다...")
 
             if tool_calls_chunks:
@@ -262,8 +269,15 @@ if user_input:
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
                         final_response += delta.content
-                        final_placeholder.markdown(final_response + "▌")
+                        # 2차 답변에서도 불필요한 이미지 텍스트 패턴 실시간 차단 정제
+                        clean_final = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
+                        clean_final = re.sub(r'\(data:image\/.*?base64,.*?\)', '', clean_final, flags=re.DOTALL)
+                        final_placeholder.markdown(clean_final + "▌")
 
+                # 최종 결과 텍스트 정규식 정제 마무리
+                final_response = re.sub(r'!\[.*?\]\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
+                final_response = re.sub(r'\(data:image\/.*?base64,.*?\)', '', final_response, flags=re.DOTALL)
+                
                 final_placeholder.markdown(final_response)
                 st.session_state.messages.append({"role": "assistant", "content": final_response})
             
