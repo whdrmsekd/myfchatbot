@@ -8,7 +8,7 @@ load_dotenv()
 
 # ── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="컴퓨터 및 연산 전문가 AI",
+    page_title="종근당의 첫 AI챗봇",
     page_icon="💻",
     layout="centered",
 )
