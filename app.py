@@ -8,7 +8,7 @@ load_dotenv()
 
 # ── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="종근당의 첫 AI챗봇",
+    page_title="종근당의 AI챗봇",
     page_icon="💻",
     layout="centered",
 )
@@ -77,7 +77,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []   # OpenAI API 규격에 맞는 딕셔너리 리스트로 통합 변경
 
 # ── 헤더 ────────────────────────────────────────────────────────────────────
-st.title("💻 종근당의 첫 AI챗봇")
+st.title("💻 종근당의 AI챗봇")
 st.caption("Azure OpenAI 기반 챗봇")
 st.divider()
 
