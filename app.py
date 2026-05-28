@@ -77,8 +77,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []   # OpenAI API 규격에 맞는 딕셔너리 리스트로 통합 변경
 
 # ── 헤더 ────────────────────────────────────────────────────────────────────
-st.title("💻 컴퓨터 및 연산 전문가 AI")
-st.caption("Azure OpenAI 기반 챗봇 · 사칙연산 기능 툴 콜링 지원")
+st.title("💻 종근당의 첫 AI챗봇")
+st.caption("Azure OpenAI 기반 챗봇")
 st.divider()
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
