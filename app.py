@@ -81,7 +81,7 @@ for msg in st.session_state.messages:
             st.image(msg["image"], caption="업로드된 이미지")
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
-user_input = st.chat_input("산안법이나 안전 규정에 대해 물어보세요...")
+user_input = st.chat_input("무엇이든 물어보세요...")
 
 if user_input:
     # 1. 업로드된 이미지가 있는지 확인 및 Base64 인코딩 처리
