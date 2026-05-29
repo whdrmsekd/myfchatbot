@@ -10,7 +10,7 @@ load_dotenv()
 
 # ── [고정] 페이지 설정 ──────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="종근당의 안전관리 챗봇",
+    page_title="종근당 챗봇",
     page_icon="💻",
     layout="centered",
 )
@@ -66,7 +66,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ── [고정] 헤더 ──────────────────────────────────────────────────────────────
-st.title("💻 종근당의 안전관리 챗봇")
+st.title("종근당의 챗봇")
 st.caption("Azure OpenAI & AI Search 기반 RAG + Vision 챗봇")
 st.divider()
 
