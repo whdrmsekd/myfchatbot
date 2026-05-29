@@ -75,11 +75,14 @@ client = AzureOpenAI(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ── [함수] 답변에서 파이썬 코드 블록만 지우고 텍스트만 추출 ──────────────────
+# ── 💡 [정교화] 덜 완성된 코드 블록이나 열린 태그까지 실시간으로 도려내는 함수 ──
 def get_clean_text_without_code(text):
-    """답변 내용 중 ```python ... ``` 구조를 완전히 제거한 순수 설명글만 반환합니다."""
-    clean_text = re.sub(r"```python(.*?)```", "", text, flags=re.DOTALL)
-    return clean_text.strip()
+    """답변 내용 중 코드 블록 및 실시간으로 생성 중인 미완성 코드 태그까지 완벽히 제거합니다."""
+    # 1. 완성된 ```python ... ``` 블록 제거
+    text = re.sub(r"```python(.*?)```", "", text, flags=re.DOTALL)
+    # 2. 실시간 스트리밍 중 아직 닫히지 않고 열려 있는 ```python 부분 이후를 통째로 제거
+    text = re.sub(r"```python(.*)", "", text, flags=re.DOTALL)
+    return text.strip()
 
 # ── [함수] 백그라운드 그래프 엔진 ───────────────────────────────────────────
 def render_dynamic_graph(text):
@@ -109,7 +112,6 @@ def render_dynamic_graph(text):
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🙋" if msg["role"] == "user" else "💬"):
         if msg.get("content"):
-            # 데이터 분석 모드이면서 생성된 파이썬 코드 블록이 본문에 포함되어 있을 때만 필터링 적용
             if msg["role"] == "assistant" and "📊" in msg.get("mode", "") and "```python" in msg.get("content", ""):
                 display_text = get_clean_text_without_code(msg["content"])
                 if display_text:
@@ -127,7 +129,7 @@ if user_input:
 
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # 💡 [핵심 추가] 사용자의 질문에 그래프 관련 키워드가 있는지 검사합니다.
+    # 사용자의 질문에 그래프 관련 키워드가 있는지 검사
     graph_keywords = ["그래프", "그려", "차트", "시각화", "plot", "graph", "chart"]
     wants_graph = any(keyword in user_input.lower() for keyword in graph_keywords)
 
@@ -154,7 +156,6 @@ if user_input:
             }]
         }
     else:
-        # 💡 [프롬프트 조건부 분리] 사용자가 그래프를 원할 때만 코드를 작성하도록 지침 하달
         if wants_graph:
             system_instruction = (
                 "너는 종근당의 [통합 데이터 분석 및 시각화 전문가]이다. "
@@ -199,16 +200,21 @@ if user_input:
                     if hasattr(delta, 'content') and delta.content:
                         full_response += delta.content
                         
-                        # 화면 표시용 텍스트 스트리밍 분기
+                        # 화면 표시용 텍스트 실시간 검증 분기
                         if "사내 문서" in bot_mode:
                             placeholder.markdown(full_response + "▌")
                         else:
                             if wants_graph:
-                                placeholder.markdown(get_clean_text_without_code(full_response) + "\n\n(📊 그래프 차트 렌더링 중...) ▌")
+                                # 💡 [실시간 방어] 타자 쳐지는 중간 과정에서도 코드가 감지되면 즉시 잘라내어 화면에 숨김
+                                current_clean_text = get_clean_text_without_code(full_response)
+                                if current_clean_text:
+                                    placeholder.markdown(current_clean_text + "\n\n(📊 그래프 차트 생성 중...) ▌")
+                                else:
+                                    placeholder.markdown("(📊 그래프 차트 생성 중...) ▌")
                             else:
                                 placeholder.markdown(full_response + "▌")
 
-            # 최종 출력 정돈
+            # 최종 출력 확정
             if "사내 문서" in bot_mode or not wants_graph:
                 placeholder.markdown(full_response)
             else:
@@ -218,7 +224,7 @@ if user_input:
                 else:
                     placeholder.empty()
             
-            # 사용자가 원했을 때만 그래프 빌드 구동
+            # 백그라운드에서 조용히 코드를 실행하여 설명글 밑에 그래프 배치
             if "사내 문서" not in bot_mode and wants_graph:
                 render_dynamic_graph(full_response)
             
