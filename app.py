@@ -107,55 +107,7 @@ if user_input:
         placeholder = st.empty()
         full_response = ""
 
-    try:
+        # 💡 [교정 완료] try 구문이 with 절 안쪽으로 올바르게 들어왔습니다.
+        try:
             # RAG(Azure Search)와 가상 파이썬 환경(Code Interpreter)을 올바른 Azure 스펙으로 병렬 배치
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=chat_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stream=True,
-                extra_body={
-                    "data_sources": [
-                        # 1. RAG 지식 검색 소스 설정
-                        {
-                            "type": "azure_search",
-                            "parameters": {
-                                "endpoint": f"{search_endpoint}",
-                                "index_name": search_index,
-                                "semantic_configuration": "rag-10ai017safety-semantic-configuration",
-                                "query_type": "semantic",
-                                "fields_mapping": {},
-                                "in_scope": True,
-                                "filter": None,
-                                "strictness": 3,
-                                "top_n_documents": 5,
-                                "authentication": {
-                                    "type": "api_key",
-                                    "key": f"{search_key}"
-                                }
-                            }
-                        },
-                        # 2. 💻 파이썬 가상 머신(Advanced Data Analytics) 올바른 확장 규격 배치
-                        {
-                            "type": "azure_vnet_code_interpreter",
-                            "parameters": {
-                                "auth": {
-                                    "type": "access_token" # 혹은 공백으로 두어도 Azure 환경에 따라 자동 연동됩니다.
-                                }
-                            }
-                        }
-                    ]
-                }
-            )
-
-            for chunk in response:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        full_response += delta.content
-                        placeholder.markdown(full_response + "▌")
-
-            placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            response =
