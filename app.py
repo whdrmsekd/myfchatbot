@@ -47,12 +47,12 @@ if "messages" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ 설정 및 모드 변경")
 
-    # 💡 사용자가 직관적으로 업무 모드를 선택할 수 있도록 하여 API 400 에러를 원천 차단합니다.
+    # 💡 데이터 소스 충돌을 완벽히 격리하기 위해 사용자 모드를 분리합니다.
     bot_mode = st.radio(
         "🤖 작업 모드 선택",
-        ["📝 법령 질문", "📊 데이터 분석"],
+        ["📝 사내 문서/산안법 검색 (RAG)", "📊 사칙연산/고급 수식 계산"],
         index=0,
-        help="수행할 업무에 맞는 모드를 선택하면 최적의 도구가 자동으로 매핑됩니다."
+        help="수행할 업무에 맞는 모드를 선택하세요."
     )
 
     st.divider()
@@ -89,67 +89,66 @@ if user_input:
         "content": user_input
     })
 
-    # 2. 선택된 모드에 따른 시스템 지침 및 단일 데이터 소스(data_source) 동적 세팅
+    # 2. 기본 API 매개변수 설정
+    api_kwargs = {
+        "model": deployment,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "stream": True,
+    }
+
+    # 3. [모드별 분기 처리] - 시스템 지침 및 확장 body 설정
     if "사내 문서" in bot_mode:
         system_instruction = (
             "너는 종근당의 [규정 및 산안법 분석 전문가]이다. "
-            "현재 사내 문서 지식 검색 모드이므로 연동된 azure_search 데이터 소스를 바탕으로 "
-            "철저히 문서 내용에 기반하여 정확하고 사실적인 답변을 작성하라."
+            "연동된 사내 문서(azure_search) 내용을 최우선으로 참고하여 정확하고 사실적인 답변을 작성하라."
         )
-        chosen_source = {
-            "type": "azure_search",
-            "parameters": {
-                "endpoint": f"{search_endpoint}",
-                "index_name": search_index,
-                "semantic_configuration": "rag-10ai017safety-semantic-configuration",
-                "query_type": "semantic",
-                "fields_mapping": {},
-                "in_scope": True,
-                "filter": None,
-                "strictness": 3,
-                "top_n_documents": 5,
-                "authentication": {
-                    "type": "api_key",
-                    "key": f"{search_key}"
+        # 📝 RAG 모드일 때는 오직 규격에 맞는 'azure_search' 1개만 매핑
+        api_kwargs["extra_body"] = {
+            "data_sources": [{
+                "type": "azure_search",
+                "parameters": {
+                    "endpoint": f"{search_endpoint}",
+                    "index_name": search_index,
+                    "semantic_configuration": "rag-10ai017safety-semantic-configuration",
+                    "query_type": "semantic",
+                    "fields_mapping": {},
+                    "in_scope": True,
+                    "filter": None,
+                    "strictness": 3,
+                    "top_n_documents": 5,
+                    "authentication": {
+                        "type": "api_key",
+                        "key": f"{search_key}"
+                    }
                 }
-            }
+            }]
         }
     else:
         system_instruction = (
-            "너는 종근당의 [통합 데이터 분석 전문가]이다. "
-            "현재 사칙연산 및 파이썬 분석 모드이므로 계산 요청을 받으면 절대로 암산하거나 임의로 계산하지 말고, "
-            "반드시 내장된 파이썬 code_interpreter를 실행하여 소수점까지 오차 없는 완벽한 계산 결과를 도출하라."
+            "너는 종근당의 [수학 및 계산 전문가]이다. "
+            "사칙연산, 수식 계산, 통계 등의 요청이 들어오면 수식을 논리적인 단계로 나누어 오차 없이 정확하게 계산하라."
         )
-        chosen_source = {
-            "type": "azure_vnet_code_interpreter",
-            "parameters": {
-                "auth": {"type": "access_token"}
-            }
-        }
+        # 📊 계산 모드일 때는 에러를 유발하는 extra_body를 완전히 비우고 일반 LLM의 고성능 추론 역량만 활용
+        if "extra_body" in api_kwargs:
+            del api_kwargs["extra_body"]
 
-    # 대화 프롬프트 배열 생성
+    # 메시지 배열 조립
     chat_prompt = [{"role": "system", "content": system_instruction}]
     for msg in st.session_state.messages:
         chat_prompt.append({"role": msg["role"], "content": msg["content"]})
+    
+    api_kwargs["messages"] = chat_prompt
 
-    # 3. 어시스턴트 답변 생성 (스트리밍)
+    # 4. 어시스턴트 답변 생성 (스트리밍)
     with st.chat_message("assistant", avatar="💬"):
         placeholder = st.empty()
         full_response = ""
 
         try:
-            # 완벽히 정렬된 단일 데이터 소스 구조로 API 호출 (400 에러 원천 해결)
-            response = client.chat.completions.create(
-                model=deployment,
-                messages=chat_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stream=True,
-                extra_body={
-                    "data_sources": [chosen_source]
-                }
-            )
+            # 안전하게 패키징된 인자들로 API 호출
+            response = client.chat.completions.create(**api_kwargs)
 
             for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
