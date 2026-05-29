@@ -14,19 +14,6 @@ st.set_page_config(
     layout="centered",
 )
 
-# ── 사이드바: 파라미터 설정 ──────────────────────────────────────────────────
-with st.sidebar:
-    st.title("⚙️ 설정")
-
-    max_tokens = st.slider("최대 토큰 (max_tokens)", 100, 8000, 4000, 100)
-    temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.05)
-    top_p = st.slider("Top-p", 0.0, 1.0, 0.95, 0.01)
-
-    st.divider()
-    if st.button("🗑️ 대화 초기화", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
-
 # ── 환경변수 로드 및 검증 ──────────────────────────────────────────────────
 endpoint = os.getenv("AZURE_OAI_ENDPOINT") or os.getenv("ENDPOINT_URL", "")
 api_key = os.getenv("AZURE_OAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY", "")
@@ -49,16 +36,38 @@ if not search_endpoint or not search_key:
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
-    api_version="2025-01-01-preview",  # 최신 다중 도구 연동 버전 지원
+    api_version="2025-01-01-preview",
 )
 
 # ── 세션 상태 초기화 ────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# ── 사이드바: 파라미터 및 작업 모드 설정 ─────────────────────────────────────
+with st.sidebar:
+    st.title("⚙️ 설정 및 모드 변경")
+
+    # 💡 사용자가 직관적으로 업무 모드를 선택할 수 있도록 하여 API 400 에러를 원천 차단합니다.
+    bot_mode = st.radio(
+        "🤖 작업 모드 선택",
+        ["📝 사내 문서/산안법 검색 (RAG)", "📊 사칙연산/파이썬 데이터 분석"],
+        index=0,
+        help="수행할 업무에 맞는 모드를 선택하면 최적의 도구가 자동으로 매핑됩니다."
+    )
+
+    st.divider()
+    max_tokens = st.slider("최대 토큰 (max_tokens)", 100, 8000, 4000, 100)
+    temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.05)
+    top_p = st.slider("Top-p", 0.0, 1.0, 0.95, 0.01)
+
+    st.divider()
+    if st.button("🗑️ 대화 초기화", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
 # ── [고정] 헤더 ──────────────────────────────────────────────────────────────
 st.title("종근당의 통합 AI 챗봇")
-st.caption("Azure OpenAI 기반 [RAG 문서 검색 + 파이썬 데이터 분석] 통합 에이전트")
+st.caption(f"현재 작동 모드: **{bot_mode}**")
 st.divider()
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
@@ -68,7 +77,7 @@ for msg in st.session_state.messages:
             st.markdown(msg["content"])
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
-user_input = st.chat_input("규정 검색이나 수식 계산/데이터 분석을 요청하세요...")
+user_input = st.chat_input("선택한 모드에 맞춰 질문을 입력하세요...")
 
 if user_input:
     # 1. 사용자 메시지 화면 출력 및 세션 저장
@@ -80,25 +89,46 @@ if user_input:
         "content": user_input
     })
 
-    # 2. [Assistant Index]가 내장된 시스템 가이드라인 정의
-    system_instruction = (
-        "너는 종근당의 [통합 데이터 및 규정 분석 전문가]이다. "
-        "사용자의 질문 성격에 따라 아래의 [Assistant Index] 규칙을 엄격히 준수하여 도구를 사용하라.\n\n"
-        "[Assistant Index]\n"
-        "1. INDEX-RAG (사내 문서 및 산안법 조회): 안전 규정, 산안법, 사내 지침 등 지식 검색이 필요한 경우 "
-        "연동된 azure_search 데이터 소스를 바탕으로 사실에 기반하여 답변할 것.\n"
-        "2. INDEX-CALC (파이썬 기반 사칙연산 및 통계): 복잡한 수학 계산, 통계 공식, 사칙연산 수식 요청이 들어오면 "
-        "암산하지 말고 반드시 내장된 파이썬 code_interpreter를 실행하여 완벽한 계산 결과를 도출할 것.\n"
-        "3. INDEX-ANALYTICS (데이터 분석 및 시각화): 데이터 요약이나 차트 생성을 요청받으면 "
-        "파이썬 환경에서 분석 코드를 수행하고 정교한 인사이트를 도출할 것.\n\n"
-        "지시사항: 질문의 의도를 파악하여 적절한 INDEX 모드로 전환 후 답변을 작성하라."
-    )
+    # 2. 선택된 모드에 따른 시스템 지침 및 단일 데이터 소스(data_source) 동적 세팅
+    if "사내 문서" in bot_mode:
+        system_instruction = (
+            "너는 종근당의 [규정 및 산안법 분석 전문가]이다. "
+            "현재 사내 문서 지식 검색 모드이므로 연동된 azure_search 데이터 소스를 바탕으로 "
+            "철저히 문서 내용에 기반하여 정확하고 사실적인 답변을 작성하라."
+        )
+        chosen_source = {
+            "type": "azure_search",
+            "parameters": {
+                "endpoint": f"{search_endpoint}",
+                "index_name": search_index,
+                "semantic_configuration": "rag-10ai017safety-semantic-configuration",
+                "query_type": "semantic",
+                "fields_mapping": {},
+                "in_scope": True,
+                "filter": None,
+                "strictness": 3,
+                "top_n_documents": 5,
+                "authentication": {
+                    "type": "api_key",
+                    "key": f"{search_key}"
+                }
+            }
+        }
+    else:
+        system_instruction = (
+            "너는 종근당의 [통합 데이터 분석 전문가]이다. "
+            "현재 사칙연산 및 파이썬 분석 모드이므로 계산 요청을 받으면 절대로 암산하거나 임의로 계산하지 말고, "
+            "반드시 내장된 파이썬 code_interpreter를 실행하여 소수점까지 오차 없는 완벽한 계산 결과를 도출하라."
+        )
+        chosen_source = {
+            "type": "azure_vnet_code_interpreter",
+            "parameters": {
+                "auth": {"type": "access_token"}
+            }
+        }
 
-    chat_prompt = [
-        {"role": "system", "content": system_instruction}
-    ]
-    
-    # 이전 대화 문맥 추가
+    # 대화 프롬프트 배열 생성
+    chat_prompt = [{"role": "system", "content": system_instruction}]
     for msg in st.session_state.messages:
         chat_prompt.append({"role": msg["role"], "content": msg["content"]})
 
@@ -107,9 +137,8 @@ if user_input:
         placeholder = st.empty()
         full_response = ""
 
-        # 💡 [교정 완료] try 구문이 with 절 안쪽으로 올바르게 들어왔습니다.
         try:
-            # RAG(Azure Search)와 가상 파이썬 환경(Code Interpreter)을 올바른 Azure 스펙으로 병렬 배치
+            # 완벽히 정렬된 단일 데이터 소스 구조로 API 호출 (400 에러 원천 해결)
             response = client.chat.completions.create(
                 model=deployment,
                 messages=chat_prompt,
@@ -118,36 +147,7 @@ if user_input:
                 top_p=top_p,
                 stream=True,
                 extra_body={
-                    "data_sources": [
-                        # 1. RAG 지식 검색 소스 설정
-                        {
-                            "type": "azure_search",
-                            "parameters": {
-                                "endpoint": f"{search_endpoint}",
-                                "index_name": search_index,
-                                "semantic_configuration": "rag-10ai017safety-semantic-configuration",
-                                "query_type": "semantic",
-                                "fields_mapping": {},
-                                "in_scope": True,
-                                "filter": None,
-                                "strictness": 3,
-                                "top_n_documents": 5,
-                                "authentication": {
-                                    "type": "api_key",
-                                    "key": f"{search_key}"
-                                }
-                            }
-                        },
-                        # 2. 💻 파이썬 가상 머신(Advanced Data Analytics) 올바른 확장 규격 배치
-                        {
-                            "type": "azure_vnet_code_interpreter",
-                            "parameters": {
-                                "auth": {
-                                    "type": "access_token"
-                                }
-                            }
-                        }
-                    ]
+                    "data_sources": [chosen_source]
                 }
             )
 
