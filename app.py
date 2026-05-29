@@ -159,5 +159,3 @@ if user_input:
 
             placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
-        except Exception as e:
-            st.error(f"❌ 오류 발생: {e}")
