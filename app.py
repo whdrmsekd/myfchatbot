@@ -107,8 +107,8 @@ if user_input:
         placeholder = st.empty()
         full_response = ""
 
-        try:
-            # 💡 RAG(Azure Search)와 Code Interpreter(가상 컴퓨팅) 도구를 동시에 병렬 배치
+    try:
+            # RAG(Azure Search)와 가상 파이썬 환경(Code Interpreter)을 올바른 Azure 스펙으로 병렬 배치
             response = client.chat.completions.create(
                 model=deployment,
                 messages=chat_prompt,
@@ -117,26 +117,36 @@ if user_input:
                 top_p=top_p,
                 stream=True,
                 extra_body={
-                    "data_sources": [{
-                        "type": "azure_search",
-                        "parameters": {
-                            "endpoint": f"{search_endpoint}",
-                            "index_name": search_index,
-                            "semantic_configuration": "rag-10ai017safety-semantic-configuration",
-                            "query_type": "semantic",
-                            "fields_mapping": {},
-                            "in_scope": True,
-                            "filter": None,
-                            "strictness": 3,
-                            "top_n_documents": 5,
-                            "authentication": {
-                                "type": "api_key",
-                                "key": f"{search_key}"
+                    "data_sources": [
+                        # 1. RAG 지식 검색 소스 설정
+                        {
+                            "type": "azure_search",
+                            "parameters": {
+                                "endpoint": f"{search_endpoint}",
+                                "index_name": search_index,
+                                "semantic_configuration": "rag-10ai017safety-semantic-configuration",
+                                "query_type": "semantic",
+                                "fields_mapping": {},
+                                "in_scope": True,
+                                "filter": None,
+                                "strictness": 3,
+                                "top_n_documents": 5,
+                                "authentication": {
+                                    "type": "api_key",
+                                    "key": f"{search_key}"
+                                }
+                            }
+                        },
+                        # 2. 💻 파이썬 가상 머신(Advanced Data Analytics) 올바른 확장 규격 배치
+                        {
+                            "type": "azure_vnet_code_interpreter",
+                            "parameters": {
+                                "auth": {
+                                    "type": "access_token" # 혹은 공백으로 두어도 Azure 환경에 따라 자동 연동됩니다.
+                                }
                             }
                         }
-                    }],
-                    # 💻 파이썬 가상 머신(기존 Assistants API의 Code Interpreter 기능)을 Chat에 장착
-                    "tools": [{"type": "azure_vnet_code_interpreter"}] 
+                    ]
                 }
             )
 
@@ -149,6 +159,5 @@ if user_input:
 
             placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
-
         except Exception as e:
             st.error(f"❌ 오류 발생: {e}")
