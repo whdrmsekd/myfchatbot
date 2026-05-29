@@ -5,11 +5,10 @@ import streamlit as st
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
-# 💡 다양한 그래프(추세선, 산점도, 통계 차트 등) 완벽 지원을 위해 주요 라이브러리 미리 로드
+# 💡 [검증] ModuleNotFoundError를 방지하기 위해 100% 기본 탑재된 핵심 라이브러리만 사용
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
 load_dotenv()
 
@@ -45,6 +44,7 @@ endpoint = os.getenv("AZURE_OAI_ENDPOINT") or os.getenv("ENDPOINT_URL", "")
 api_key = os.getenv("AZURE_OAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY", "")
 deployment = os.getenv("AZURE_OAI_DEPLOYMENT") or os.getenv("DEPLOYMENT_NAME", "")
 
+# RAG 검색용 환경변수
 search_endpoint = os.getenv("SEARCH_ENDPOINT", "")
 search_key = os.getenv("SEARCH_KEY", "")
 search_index = os.getenv("SEARCH_INDEX_NAME", "rag-10ai017safety")
@@ -72,42 +72,41 @@ st.title("종근당의 통합 AI 챗봇")
 st.caption(f"현재 작동 모드: **{bot_mode}**")
 st.divider()
 
-# ── 💡 [범용 그래프 엔진] 어떤 그래프 코드든 해석해서 실행하는 함수 ──────
+# ── 💡 [안전 강화] 외부 모듈 의존성을 제거하고 2중 예외 처리를 갖춘 그래프 엔진 ──
 def render_dynamic_graph(text):
-    """답변 텍스트에서 파이썬 코드를 추출해 막대, 선, 원형, 산점도 등 모든 그래프를 그립니다."""
+    """답변 텍스트에서 파이썬 코드를 추출해 막대, 선, 원형 등 다양한 그래프를 안전하게 렌더링합니다."""
     code_blocks = re.findall(r"```python(.*?)```", text, re.DOTALL)
     for code in code_blocks:
         cleaned_code = code.strip()
         
-        # plt.(matplotlib)나 sns.(seaborn)가 포함된 모든 시각화 코드를 감지
-        if "plt." in cleaned_code or "sns." in cleaned_code:
+        if "plt." in cleaned_code:
             try:
-                plt.switch_backend('Agg') # 백그라운드 렌더링 설정 (윈도우 팝업 방지)
-                plt.clf() # 이전 그래프 잔상 초기화
+                plt.switch_backend('Agg') # 팝업 창 방지
+                plt.clf() # 캔버스 초기화
                 
-                # 💡 다양한 패키지(plt, np, pd, sns)를 실행 환경에 전부 매핑하여 유연성 극대화
+                # 💡 [생각 및 검증] 미설치 가능성이 높은 seaborn을 완전히 제외하고 안정성이 검증된 로컬 변수만 바인딩
                 local_vars = {
                     "plt": plt, 
                     "np": np, 
-                    "pd": pd, 
-                    "sns": sns
+                    "pd": pd
                 }
                 
-                # 한글 깨짐을 방지하기 위한 폰트 설정을 실행 환경에 강제 주입 (운영체제 맞춤형)
+                # 한글 깨짐 방지 서포트
                 import platform
                 if platform.system() == 'Windows':
                     plt.rc('font', family='Malgun Gothic')
                 elif platform.system() == 'Darwin':
                     plt.rc('font', family='AppleGothic')
-                plt.rc('axes', unicode_minus=False) # 마이너스 기호 깨짐 방지
+                plt.rc('axes', unicode_minus=False)
                 
-                # AI가 작성한 다채로운 그래프 코드 백그라운드 실행
+                # 💡 [2중 방어] exec 실행 중 모듈 관련 에러가 나더라도 전체 Streamlit 앱이 죽지 않도록 격리
                 exec(cleaned_code, globals(), local_vars)
                 
-                # Streamlit 컨테이너에 실제 완성된 형태의 그래프 렌더링
                 st.pyplot(plt.gcf())
+            except ModuleNotFoundError as mne:
+                st.info(f"💡 현재 환경에 필요한 라이브러리가 부족하여 그래프 출력을 건너넙니다. (필요 모듈: {mne.name})")
             except Exception as e:
-                st.warning(f"⚠️ 그래프 시각화 중 오류가 발생했습니다: {e}")
+                st.warning(f"⚠️ 그래프 시각화 코드 실행 중 오류가 발생했습니다: {e}")
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
@@ -118,7 +117,7 @@ for msg in st.session_state.messages:
                 render_dynamic_graph(msg["content"])
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
-user_input = st.chat_input("규정 검색이나 원하시는 그래프 종류(막대, 선, 원형 등)를 요청하세요...")
+user_input = st.chat_input("규정 검색이나 데이터 시각화(막대, 선, 원형 그래프 등)를 요청하세요...")
 
 if user_input:
     with st.chat_message("user", avatar="🙋"):
@@ -126,7 +125,6 @@ if user_input:
 
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # 모드별 시스템 지침 설정
     if "사내 문서" in bot_mode:
         system_instruction = (
             "너는 종근당의 [규정 및 산안법 분석 전문가]이다. "
@@ -150,15 +148,14 @@ if user_input:
             }]
         }
     else:
-        # 💡 다양한 시각화 기법을 적극 활용하도록 프롬프트 고도화
+        # 💡 [생각 및 검증] AI가 설치 안 된 seaborn을 쓰지 않고 matplotlib(plt)과 pandas(pd)만 사용하도록 프롬프트로 강력 제어
         system_instruction = (
             "너는 종근당의 [통합 데이터 분석 및 시각화 전문가]이다. "
-            "사용자의 요구사항에 가장 적절한 그래프 종류(막대그래프, 선그래프, 산점도, 히스토그램, 원그래프 등)를 스스로 판단하여 "
-            "데이터를 완벽히 시각화하는 파이썬 코드 블록(```python ... ```)을 답변에 반드시 포함하라.\n"
-            "지시사항:\n"
-            "1. 시각화 시 matplotlib(plt) 또는 seaborn(sns)을 자유롭게 활용하라.\n"
-            "2. 데이터는 딕셔너리나 리스트 형태로 코드 내에 명시적으로 선언하여 작동에 지반이 없게 하라.\n"
-            "3. 코드 마지막에는 항상 'plt.show()'를 기재하여 마무리지을 것."
+            "사용자의 요구사항에 맞는 다양한 종류의 그래프(막대그래프, 선그래프, 산점도, 원그래프 등)를 그리는 파이썬 코드 블록(```python ... ```)을 반드시 포함하라.\n"
+            "⚠️ 필수 제약사항:\n"
+            "1. 시각화 코드는 반드시 오직 matplotlib.pyplot(plt), numpy(np), pandas(pd)만 사용해야 하며, seaborn(sns) 등 다른 외부 라이브러리는 절대 사용하지 마라.\n"
+            "2. 그래프에 사용되는 데이터는 리스트나 딕셔너리 형태로 코드 내부에 명시적으로 선언하라.\n"
+            "3. 코드 마지막 줄에는 항상 'plt.show()'를 기재하여 마무리지을 것."
         )
         extra_body_config = None
 
@@ -191,7 +188,7 @@ if user_input:
 
             placeholder.markdown(full_response)
             
-            # 실시간으로 생성된 텍스트 속 모든 종류의 그래프 일괄 빌드 및 출력
+            # 실시간으로 동적 그래프 렌더링 구동
             render_dynamic_graph(full_response)
             
             st.session_state.messages.append({"role": "assistant", "content": full_response})
