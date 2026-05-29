@@ -9,7 +9,7 @@ load_dotenv()
 
 # ── [고정] 페이지 설정 ──────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="종근당 챗봇",
+    page_title="종근당 통합 AI 챗봇",
     page_icon="💻",
     layout="centered",
 )
@@ -32,6 +32,7 @@ endpoint = os.getenv("AZURE_OAI_ENDPOINT") or os.getenv("ENDPOINT_URL", "")
 api_key = os.getenv("AZURE_OAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY", "")
 deployment = os.getenv("AZURE_OAI_DEPLOYMENT") or os.getenv("DEPLOYMENT_NAME", "")
 
+# RAG 검색용 환경변수
 search_endpoint = os.getenv("SEARCH_ENDPOINT", "")
 search_key = os.getenv("SEARCH_KEY", "")
 search_index = os.getenv("SEARCH_INDEX_NAME", "rag-10ai017safety")
@@ -48,7 +49,7 @@ if not search_endpoint or not search_key:
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
-    api_version="2025-01-01-preview",
+    api_version="2025-01-01-preview",  # 최신 다중 도구 연동 버전 지원
 )
 
 # ── 세션 상태 초기화 ────────────────────────────────────────────────────────
@@ -56,8 +57,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ── [고정] 헤더 ──────────────────────────────────────────────────────────────
-st.title("종근당의 챗봇")
-st.caption("Azure OpenAI & AI Search 기반 RAG 챗봇")
+st.title("종근당의 통합 AI 챗봇")
+st.caption("Azure OpenAI 기반 [RAG 문서 검색 + 파이썬 데이터 분석] 통합 에이전트")
 st.divider()
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ for msg in st.session_state.messages:
             st.markdown(msg["content"])
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
-user_input = st.chat_input("무엇이든 물어보세요...")
+user_input = st.chat_input("규정 검색이나 수식 계산/데이터 분석을 요청하세요...")
 
 if user_input:
     # 1. 사용자 메시지 화면 출력 및 세션 저장
@@ -79,9 +80,22 @@ if user_input:
         "content": user_input
     })
 
-    # 2. API 요청을 위한 메시지 배열 생성
+    # 2. [Assistant Index]가 내장된 시스템 가이드라인 정의
+    system_instruction = (
+        "너는 종근당의 [통합 데이터 및 규정 분석 전문가]이다. "
+        "사용자의 질문 성격에 따라 아래의 [Assistant Index] 규칙을 엄격히 준수하여 도구를 사용하라.\n\n"
+        "[Assistant Index]\n"
+        "1. INDEX-RAG (사내 문서 및 산안법 조회): 안전 규정, 산안법, 사내 지침 등 지식 검색이 필요한 경우 "
+        "연동된 azure_search 데이터 소스를 바탕으로 사실에 기반하여 답변할 것.\n"
+        "2. INDEX-CALC (파이썬 기반 사칙연산 및 통계): 복잡한 수학 계산, 통계 공식, 사칙연산 수식 요청이 들어오면 "
+        "암산하지 말고 반드시 내장된 파이썬 code_interpreter를 실행하여 완벽한 계산 결과를 도출할 것.\n"
+        "3. INDEX-ANALYTICS (데이터 분석 및 시각화): 데이터 요약이나 차트 생성을 요청받으면 "
+        "파이썬 환경에서 분석 코드를 수행하고 정교한 인사이트를 도출할 것.\n\n"
+        "지시사항: 질문의 의도를 파악하여 적절한 INDEX 모드로 전환 후 답변을 작성하라."
+    )
+
     chat_prompt = [
-        {"role": "system", "content": "사용자가 정보를 찾는 데 도움이 되는 AI 도우미입니다. 사내 문서 내용을 기반으로 정확하게 답변하세요."}
+        {"role": "system", "content": system_instruction}
     ]
     
     # 이전 대화 문맥 추가
@@ -94,6 +108,7 @@ if user_input:
         full_response = ""
 
         try:
+            # 💡 RAG(Azure Search)와 Code Interpreter(가상 컴퓨팅) 도구를 동시에 병렬 배치
             response = client.chat.completions.create(
                 model=deployment,
                 messages=chat_prompt,
@@ -119,7 +134,9 @@ if user_input:
                                 "key": f"{search_key}"
                             }
                         }
-                    }]
+                    }],
+                    # 💻 파이썬 가상 머신(기존 Assistants API의 Code Interpreter 기능)을 Chat에 장착
+                    "tools": [{"type": "azure_vnet_code_interpreter"}] 
                 }
             )
 
