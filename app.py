@@ -19,17 +19,17 @@ st.set_page_config(
     layout="centered",
 )
 
-# 💡 [한글 깨짐 원천 차단] 시스템 운영체제에 맞는 한글 폰트를 앱 시작 시 전역 설정합니다.
+# ── [한글 깨짐 전역 방지] ──────────────────────────────────────────────────
 import platform
 try:
     if platform.system() == 'Windows':
         plt.rc('font', family='Malgun Gothic')
     elif platform.system() == 'Darwin':  # Mac
         plt.rc('font', family='AppleGothic')
-    else:  # 리눅스/서버 환경 등 기본 폰트가 없을 때 깨짐 방지용 기본 설정
+    else:
         plt.rc('font', family='sans-serif')
-    plt.rc('axes', unicode_minus=False)  # 마이너스 기호 깨짐 방지
-except Exception as font_err:
+    plt.rc('axes', unicode_minus=False)
+except Exception:
     pass
 
 # ── 사이드바: 파라미터 및 작업 모드 설정 ─────────────────────────────────────
@@ -79,10 +79,12 @@ client = AzureOpenAI(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ── [고정] 헤더 ──────────────────────────────────────────────────────────────
-st.title("종근당의 통합 AI 챗봇")
-st.caption(f"현재 작동 모드: **{bot_mode}**")
-st.divider()
+# ── 💡 [핵심 함수] 답변에서 파이썬 코드 블록만 지우고 텍스트만 추출 ───────
+def get_clean_text_without_code(text):
+    """답변 내용 중 ```python ... ``` 구조를 완전히 제거한 순수 설명글만 반환합니다."""
+    # 정규식을 사용하여 파이썬 코드 블록 부분을 공백으로 치환
+    clean_text = re.sub(r"```python(.*?)```", "", text, flags=re.DOTALL)
+    return clean_text.strip()
 
 # ── 💡 [안전 강화] 백그라운드 그래프 엔진 ───────────────────────────────────
 def render_dynamic_graph(text):
@@ -96,7 +98,6 @@ def render_dynamic_graph(text):
                 plt.switch_backend('Agg') 
                 plt.clf() 
                 
-                # 실행 컨텍스트에 폰트 재주입 (AI가 오버라이딩하는 것 방지)
                 if platform.system() == 'Windows':
                     plt.rc('font', family='Malgun Gothic')
                 elif platform.system() == 'Darwin':
@@ -105,23 +106,27 @@ def render_dynamic_graph(text):
                 local_vars = {"plt": plt, "np": np, "pd": pd}
                 exec(cleaned_code, globals(), local_vars)
                 
-                # 📊 그래프 이미지만 화면에 표시
+                # 그래프 이미지를 화면에 표시
                 st.pyplot(plt.gcf())
-            except Exception as e:
+            except Exception:
                 pass
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🙋" if msg["role"] == "user" else "💬"):
-        # 💡 [코드 숨김 제어] 데이터 분석 모드이면서 어시스턴트 답변일 때는 본문(텍스트/코드)을 그리지 않고 그래프만 복원
-        if msg["role"] == "assistant" and "📊" in msg.get("mode", ""):
-            render_dynamic_graph(msg["content"])
-        else:
-            if msg.get("content"):
+        if msg.get("content"):
+            if msg["role"] == "assistant" and "📊" in msg.get("mode", ""):
+                # 💡 [과거 이력 복원] 데이터 분석 모드인 경우 코드블록이 제외된 설명글만 먼저 출력
+                display_text = get_clean_text_without_code(msg["content"])
+                if display_text:
+                    st.markdown(display_text)
+                # 그다음 하단에 그래프 렌더링
+                render_dynamic_graph(msg["content"])
+            else:
                 st.markdown(msg["content"])
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
-user_input = st.chat_input("규정 검색이나 데이터 시각화(막대, 선, 원형 그래프 등)를 요청하세요...")
+user_input = st.chat_input("선택한 모드에 맞춰 질문을 입력하세요...")
 
 if user_input:
     with st.chat_message("user", avatar="🙋"):
@@ -152,13 +157,14 @@ if user_input:
             }]
         }
     else:
+        # 💡 [프롬프트 최적화] 정보(텍스트)와 시각화 코드(그래프)가 완전히 동반되도록 지침 명시
         system_instruction = (
             "너는 종근당의 [통합 데이터 분석 및 시각화 전문가]이다. "
-            "사용자의 요구사항에 맞는 다양한 종류의 그래프를 그리는 파이썬 코드 블록(```python ... ```)만 정확히 생성하라. "
-            "텍스트 설명은 제외하거나 최소화하고, 반드시 실행 가능한 완벽한 코드만 전달하라.\n"
+            "사용자의 요구에 맞는 데이터 설명과 정보를 친절한 텍스트 답변으로 작성하고, "
+            "그 아래에 데이터 시각화를 위한 완벽한 파이썬 코드 블록(```python ... ```)을 반드시 포함하라.\n"
             "⚠️ 필수 제약사항:\n"
             "1. 시각화 코드는 반드시 matplotlib.pyplot(plt), numpy(np), pandas(pd)만 사용할 것.\n"
-            "2. 그래프의 제목(title), 축 이름(xlabel, ylabel) 등 한글 텍스트는 문자열 그대로 작성하라. (예: plt.title('2의 제곱수 그래프'))\n"
+            "2. 그래프 한글 깨짐 방지를 위해 제목(title)이나 라벨 문자열은 한글 그대로 작성할 것.\n"
             "3. 코드 마지막 줄에는 항상 'plt.show()'를 기재하라."
         )
         extra_body_config = None
@@ -188,22 +194,26 @@ if user_input:
                     delta = chunk.choices[0].delta
                     if hasattr(delta, 'content') and delta.content:
                         full_response += delta.content
-                        # 데이터 분석 모드가 아닐 때(즉, RAG 모드일 때만) 텍스트 글자를 화면에 실시간 스트리밍 노출
+                        
+                        # 💡 실시간 답변 도중에는 진행 과정을 알 수 있도록 실시간으로 노출하되 코드 영역만 정제
                         if "사내 문서" in bot_mode:
                             placeholder.markdown(full_response + "▌")
                         else:
-                            placeholder.markdown("📊 그래프 차트를 그리는 중입니다... ▌")
+                            placeholder.markdown(get_clean_text_without_code(full_response) + "\n\n(📊 그래프 차트 렌더링 중...) ▌")
 
-            # 💡 [핵심 수정] 최종 완료 후 데이터 분석 모드라면 텍스트 코드 창을 완전히 지우고 그래프만 출력
+            # 💡 [핵심 수정] 최종 완료 후 데이터 분석 모드라면 코드 블록을 완벽히 제외한 '순수 설명글'만 화면에 출력
             if "사내 문서" in bot_mode:
                 placeholder.markdown(full_response)
             else:
-                placeholder.empty() # "그래프 그리는 중" 메시지 및 원본 파이썬 코드 텍스트 숨김 처리
+                display_text = get_clean_text_without_code(full_response)
+                if display_text:
+                    placeholder.markdown(display_text)
+                else:
+                    placeholder.empty()
             
-            # 그래프 빌드 엔진 호출 (화면에 진짜 차트 이미지 생성)
+            # 설명글 하단에 진짜 차트 이미지 생성
             render_dynamic_graph(full_response)
             
-            # 이전 히스토리에 현재 모드 정보를 매킹하여 세션 저장 (새로고침 시 코드 숨김 유지용)
             st.session_state.messages.append({
                 "role": "assistant", 
                 "content": full_response,
