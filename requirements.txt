@@ -2,3 +2,5 @@ openai
 python-dotenv
 streamlit
 requests
+numpy
+matplotlib
