@@ -1,7 +1,6 @@
 import os
 import time
 import re
-import base64
 import streamlit as st
 from openai import AzureOpenAI
 from dotenv import load_dotenv
@@ -15,22 +14,13 @@ st.set_page_config(
     layout="centered",
 )
 
-# ── 사이드바: 파라미터 및 파일 업로드 설정 ─────────────────────────────────────
+# ── 사이드바: 파라미터 설정 ──────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚙️ 설정 및 파일")
+    st.title("⚙️ 설정")
 
     max_tokens = st.slider("최대 토큰 (max_tokens)", 100, 8000, 4000, 100)
     temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.05)
     top_p = st.slider("Top-p", 0.0, 1.0, 0.95, 0.01)
-
-    st.divider()
-    
-    # 📸 이미지 파일 업로드 컴포넌트 추가
-    uploaded_file = st.file_uploader(
-        "분석할 이미지를 업로드하세요 (옵션)", 
-        type=["jpg", "jpeg", "png"],
-        help="산안법 관련 현장 사진이나 문서 캡처본을 올리면 함께 분석합니다."
-    )
 
     st.divider()
     if st.button("🗑️ 대화 초기화", use_container_width=True):
@@ -67,68 +57,38 @@ if "messages" not in st.session_state:
 
 # ── [고정] 헤더 ──────────────────────────────────────────────────────────────
 st.title("종근당의 챗봇")
-st.caption("Azure OpenAI & AI Search 기반 RAG + Vision 챗봇")
+st.caption("Azure OpenAI & AI Search 기반 RAG 챗봇")
 st.divider()
 
 # ── 기존 대화 출력 ───────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🙋" if msg["role"] == "user" else "💬"):
-        # 텍스트 출력
         if msg.get("content"):
             st.markdown(msg["content"])
-        # 저장된 이미지가 있다면 함께 출력
-        if msg.get("image"):
-            st.image(msg["image"], caption="업로드된 이미지")
 
 # ── 사용자 입력 및 처리 ──────────────────────────────────────────────────────
 user_input = st.chat_input("무엇이든 물어보세요...")
 
 if user_input:
-    # 1. 업로드된 이미지가 있는지 확인 및 Base64 인코딩 처리
-    base64_image = None
-    uploaded_image_bytes = None
-    
-    if uploaded_file is not None:
-        uploaded_image_bytes = uploaded_file.read()
-        # API 전송을 위한 base64 변환
-        base64_image = base64.b64encode(uploaded_image_bytes).decode("utf-8")
-
-    # 2. 사용자 메시지 화면 출력 및 세션 저장
+    # 1. 사용자 메시지 화면 출력 및 세션 저장
     with st.chat_message("user", avatar="🙋"):
         st.markdown(user_input)
-        if uploaded_image_bytes:
-            st.image(uploaded_image_bytes, caption="업로드된 이미지")
 
     st.session_state.messages.append({
         "role": "user", 
-        "content": user_input,
-        "image": uploaded_image_bytes  # 세션 복원용 바이너리 데이터
+        "content": user_input
     })
 
-    # 3. API 요청을 위한 메시지 배열 생성 (멀티모달 구조 대응)
+    # 2. API 요청을 위한 메시지 배열 생성
     chat_prompt = [
-        {"role": "system", "content": "사용자가 정보를 찾는 데 도움이 되는 AI 도우미입니다. 문서 내용과 업로드된 이미지를 함께 분석하여 정확하게 답변하세요."}
+        {"role": "system", "content": "사용자가 정보를 찾는 데 도움이 되는 AI 도우미입니다. 사내 문서 내용을 기반으로 정확하게 답변하세요."}
     ]
     
     # 이전 대화 문맥 추가
-    for msg in st.session_state.messages[:-1]:
+    for msg in st.session_state.messages:
         chat_prompt.append({"role": msg["role"], "content": msg["content"]})
-        
-    # 현재 메시지 생성 (이미지가 있으면 텍스트+이미지 리스트 구조로 전달)
-    if base64_image:
-        current_content = [
-            {"type": "text", "text": user_input},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-            }
-        ]
-    else:
-        current_content = user_input
 
-    chat_prompt.append({"role": "user", "content": current_content})
-
-    # 4. 어시스턴트 답변 생성 (스트리밍)
+    # 3. 어시스턴트 답변 생성 (스트리밍)
     with st.chat_message("assistant", avatar="💬"):
         placeholder = st.empty()
         full_response = ""
