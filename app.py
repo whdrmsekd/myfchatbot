@@ -65,10 +65,6 @@ if not endpoint or not api_key or not deployment:
     st.error("❌ OpenAI 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
     st.stop()
 
-if not search_endpoint or not search_key:
-    st.error("❌ Azure AI Search 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
-    st.stop()
-
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
@@ -79,14 +75,13 @@ client = AzureOpenAI(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ── 💡 [핵심 함수] 답변에서 파이썬 코드 블록만 지우고 텍스트만 추출 ───────
+# ── [함수] 답변에서 파이썬 코드 블록만 지우고 텍스트만 추출 ──────────────────
 def get_clean_text_without_code(text):
     """답변 내용 중 ```python ... ``` 구조를 완전히 제거한 순수 설명글만 반환합니다."""
-    # 정규식을 사용하여 파이썬 코드 블록 부분을 공백으로 치환
     clean_text = re.sub(r"```python(.*?)```", "", text, flags=re.DOTALL)
     return clean_text.strip()
 
-# ── 💡 [안전 강화] 백그라운드 그래프 엔진 ───────────────────────────────────
+# ── [함수] 백그라운드 그래프 엔진 ───────────────────────────────────────────
 def render_dynamic_graph(text):
     """답변 텍스트에서 파이썬 코드를 추출해 UI에 그래프만 깔끔하게 렌더링합니다."""
     code_blocks = re.findall(r"```python(.*?)```", text, re.DOTALL)
@@ -106,7 +101,6 @@ def render_dynamic_graph(text):
                 local_vars = {"plt": plt, "np": np, "pd": pd}
                 exec(cleaned_code, globals(), local_vars)
                 
-                # 그래프 이미지를 화면에 표시
                 st.pyplot(plt.gcf())
             except Exception:
                 pass
@@ -115,12 +109,11 @@ def render_dynamic_graph(text):
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🙋" if msg["role"] == "user" else "💬"):
         if msg.get("content"):
-            if msg["role"] == "assistant" and "📊" in msg.get("mode", ""):
-                # 💡 [과거 이력 복원] 데이터 분석 모드인 경우 코드블록이 제외된 설명글만 먼저 출력
+            # 데이터 분석 모드이면서 생성된 파이썬 코드 블록이 본문에 포함되어 있을 때만 필터링 적용
+            if msg["role"] == "assistant" and "📊" in msg.get("mode", "") and "```python" in msg.get("content", ""):
                 display_text = get_clean_text_without_code(msg["content"])
                 if display_text:
                     st.markdown(display_text)
-                # 그다음 하단에 그래프 렌더링
                 render_dynamic_graph(msg["content"])
             else:
                 st.markdown(msg["content"])
@@ -133,6 +126,10 @@ if user_input:
         st.markdown(user_input)
 
     st.session_state.messages.append({"role": "user", "content": user_input})
+
+    # 💡 [핵심 추가] 사용자의 질문에 그래프 관련 키워드가 있는지 검사합니다.
+    graph_keywords = ["그래프", "그려", "차트", "시각화", "plot", "graph", "chart"]
+    wants_graph = any(keyword in user_input.lower() for keyword in graph_keywords)
 
     if "사내 문서" in bot_mode:
         system_instruction = (
@@ -157,16 +154,23 @@ if user_input:
             }]
         }
     else:
-        # 💡 [프롬프트 최적화] 정보(텍스트)와 시각화 코드(그래프)가 완전히 동반되도록 지침 명시
-        system_instruction = (
-            "너는 종근당의 [통합 데이터 분석 및 시각화 전문가]이다. "
-            "사용자의 요구에 맞는 데이터 설명과 정보를 친절한 텍스트 답변으로 작성하고, "
-            "그 아래에 데이터 시각화를 위한 완벽한 파이썬 코드 블록(```python ... ```)을 반드시 포함하라.\n"
-            "⚠️ 필수 제약사항:\n"
-            "1. 시각화 코드는 반드시 matplotlib.pyplot(plt), numpy(np), pandas(pd)만 사용할 것.\n"
-            "2. 그래프 한글 깨짐 방지를 위해 제목(title)이나 라벨 문자열은 한글 그대로 작성할 것.\n"
-            "3. 코드 마지막 줄에는 항상 'plt.show()'를 기재하라."
-        )
+        # 💡 [프롬프트 조건부 분리] 사용자가 그래프를 원할 때만 코드를 작성하도록 지침 하달
+        if wants_graph:
+            system_instruction = (
+                "너는 종근당의 [통합 데이터 분석 및 시각화 전문가]이다. "
+                "사용자가 데이터를 시각화하거나 그래프를 그려달라고 요청했으니, 요구에 맞는 설명과 함께 "
+                "그 아래에 데이터 시각화를 위한 완벽한 파이썬 코드 블록(```python ... ```)을 반드시 포함하라.\n"
+                "⚠️ 필수 제약사항:\n"
+                "1. 시각화 코드는 반드시 matplotlib.pyplot(plt), numpy(np), pandas(pd)만 사용할 것.\n"
+                "2. 그래프 제목과 라벨에 한글을 그대로 사용할 것.\n"
+                "3. 코드 마지막 줄에는 항상 'plt.show()'를 기재하라."
+            )
+        else:
+            system_instruction = (
+                "너는 종근당의 [통합 데이터 분석 전문가]이다. "
+                "사용자가 일반적인 질문이나 연산을 요청했으니, 친절하고 명확한 텍스트 답변으로만 정보를 제공하라. "
+                "⚠️ 그래프를 그리라는 말이 없으므로, 파이썬 시각화 코드 블록(```python ... ```)은 절대 작성하지 마라."
+            )
         extra_body_config = None
 
     chat_prompt = [{"role": "system", "content": system_instruction}]
@@ -195,14 +199,17 @@ if user_input:
                     if hasattr(delta, 'content') and delta.content:
                         full_response += delta.content
                         
-                        # 💡 실시간 답변 도중에는 진행 과정을 알 수 있도록 실시간으로 노출하되 코드 영역만 정제
+                        # 화면 표시용 텍스트 스트리밍 분기
                         if "사내 문서" in bot_mode:
                             placeholder.markdown(full_response + "▌")
                         else:
-                            placeholder.markdown(get_clean_text_without_code(full_response) + "\n\n(📊 그래프 차트 렌더링 중...) ▌")
+                            if wants_graph:
+                                placeholder.markdown(get_clean_text_without_code(full_response) + "\n\n(📊 그래프 차트 렌더링 중...) ▌")
+                            else:
+                                placeholder.markdown(full_response + "▌")
 
-            # 💡 [핵심 수정] 최종 완료 후 데이터 분석 모드라면 코드 블록을 완벽히 제외한 '순수 설명글'만 화면에 출력
-            if "사내 문서" in bot_mode:
+            # 최종 출력 정돈
+            if "사내 문서" in bot_mode or not wants_graph:
                 placeholder.markdown(full_response)
             else:
                 display_text = get_clean_text_without_code(full_response)
@@ -211,8 +218,9 @@ if user_input:
                 else:
                     placeholder.empty()
             
-            # 설명글 하단에 진짜 차트 이미지 생성
-            render_dynamic_graph(full_response)
+            # 사용자가 원했을 때만 그래프 빌드 구동
+            if "사내 문서" not in bot_mode and wants_graph:
+                render_dynamic_graph(full_response)
             
             st.session_state.messages.append({
                 "role": "assistant", 
